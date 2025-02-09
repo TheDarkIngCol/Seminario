@@ -3,31 +3,24 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import cv2
 import os
-import imutils
 import numpy as np
 import json
 
-# Crear carpetas necesarias si no existen
+# Crear carpetas necesarias
 os.makedirs("captures", exist_ok=True)
 os.makedirs("models", exist_ok=True)
 
-# --- Funciones de la aplicación ---
+# Ruta de modelos y datos
+lbph_model_path = "models/lbph_model.xml"
+user_data_path = "user_data.json"
 
-def iniciar_sesion():
-    usuario = usuario_entry.get()
-    contrasena = contrasena_entry.get()
-    if usuario == "admin" and contrasena == "1234":
-        messagebox.showinfo("Acceso", "Inicio de sesión exitoso")
-        mostrar_frame(menu_frame)
-    else:
-        messagebox.showerror("Acceso denegado", "Usuario o contraseña incorrectos")
+def cargar_datos_usuarios():
+    if os.path.exists(user_data_path):
+        with open(user_data_path, "r") as f:
+            return json.load(f)
+    return {}
 
-
-def mostrar_frame(frame):
-    for f in frames:
-        f.pack_forget()
-    frame.pack(fill="both", expand=True)
-
+datos_usuarios = cargar_datos_usuarios()
 
 def capturar_imagenes_para_dataset():
     nombre = nombre_entry.get()
@@ -52,96 +45,40 @@ def capturar_imagenes_para_dataset():
 
     user_path = f"captures/{numero_documento}"
     os.makedirs(user_path, exist_ok=True)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    haarcascade_path = "SEMINARIO\haarcascade_frontalface_default.xml"
-    faceClassif = cv2.CascadeClassifier(haarcascade_path)
+    cap = cv2.VideoCapture(0)
+    face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
     count = 0
-    foto_carnet_guardada = False
-
-    while True:
+    while count < 300:
         ret, frame = cap.read()
         if not ret:
             break
-
-        frame = imutils.resize(frame, width=640)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        aux_frame = frame.copy()
-        faces = faceClassif.detectMultiScale(gray, 1.3, 5)
-
+        faces = face_classifier.detectMultiScale(gray, 1.3, 5)
         for (x, y, w, h) in faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            rostro = aux_frame[y:y + h, x:x + w]
+            rostro = gray[y:y+h, x:x+w]
             rostro = cv2.resize(rostro, (150, 150), interpolation=cv2.INTER_CUBIC)
-
-            if not foto_carnet_guardada:
-                cv2.imwrite(f"{user_path}/foto_carnet.jpg", rostro)
-                foto_carnet_guardada = True
-                cv2.imwrite(f"{user_path}/rostro_{count}.jpg", rostro)
+            cv2.imwrite(f"{user_path}/rostro_{count}.jpg", rostro)
             count += 1
-
-        cv2.imshow('Capturando Imágenes - Presiona ESC para salir', frame)
-
-        if cv2.waitKey(1) == 27 or count >= 300:
+        cv2.imshow("Capturando Imágenes", frame)
+        if cv2.waitKey(1) == 27:
             break
-
     cap.release()
     cv2.destroyAllWindows()
-    guardar_datos_usuario(datos_usuario)
+    with open(f"{user_path}/datos_usuario.txt", "w") as f:
+        for key, value in datos_usuario.items():
+            f.write(f"{key}: {value}\n")
     messagebox.showinfo("Captura completada", f"Se han capturado {count} imágenes para el usuario {numero_documento}")
 
-
-def guardar_datos_usuario(datos):
-    filename = f"captures/{datos['Número de Documento']}/datos_usuario.txt"
-    with open(filename, "w") as f:
-        for key, value in datos.items():
-            f.write(f"{key}: {value}\n")
-
-
-def consultar_usuario():
-    numero_documento = numero_documento_consulta_entry.get()
-    user_path = f"captures/{numero_documento}"
-
-    if not os.path.exists(user_path):
-        messagebox.showerror("Error", "No se encontraron datos para este usuario")
-        return
-
-    # Mostrar datos del usuario
-    datos_file = f"{user_path}/datos_usuario.txt"
-    if os.path.exists(datos_file):
-        with open(datos_file, "r") as f:
-            datos = f.read()
-        messagebox.showinfo("Datos del Usuario", datos)
-    else:
-        messagebox.showerror("Error", "No se encontraron los datos del usuario")
-
-    # Mostrar foto tipo carnet
-    foto_carnet_path = f"{user_path}/foto_carnet.jpg"
-    if os.path.exists(foto_carnet_path):
-        img = Image.open(foto_carnet_path)
-        img = img.resize((150, 150))
-        img = ImageTk.PhotoImage(img)
-        foto_label.config(image=img)
-        foto_label.image = img
-    else:
-        messagebox.showerror("Error", "No se encontró la foto tipo carnet")
 def entrenar_modelos():
-    base_path = "captures"
-    if not os.path.exists(base_path):
-        messagebox.showerror("Error", "No hay imágenes disponibles para entrenar.")
-        return
-
     faces = []
     labels = []
     user_data = {}
-
     label = 0
-    for user_dir in os.listdir(base_path):
-        user_path = os.path.join(base_path, user_dir)
+    for user_dir in os.listdir("captures"):
+        user_path = os.path.join("captures", user_dir)
         if not os.path.isdir(user_path):
             continue
-
-        # Leer datos del usuario
         datos_file = f"{user_path}/datos_usuario.txt"
         if os.path.exists(datos_file):
             with open(datos_file, "r") as f:
@@ -151,115 +88,86 @@ def entrenar_modelos():
         else:
             nombre = "Desconocido"
             apellido = "Desconocido"
-            user_data[user_dir] = {
-            "Nombre": nombre,
-            "Apellido": apellido,
-            "Etiqueta": label
-        }
-
+        user_data[user_dir] = {"Nombre": nombre, "Apellido": apellido, "Etiqueta": label}
         for img_name in os.listdir(user_path):
             if img_name.startswith("rostro_") and img_name.endswith(".jpg"):
-                img_path = os.path.join(user_path, img_name)
-                img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-                img = cv2.equalizeHist(img)  # Normalización del histograma
+                img = cv2.imread(os.path.join(user_path, img_name), cv2.IMREAD_GRAYSCALE)
+                img = cv2.equalizeHist(img)
                 faces.append(img)
                 labels.append(label)
         label += 1
-
-    faces = np.array(faces)
-    labels = np.array(labels)
-
-    if len(np.unique(labels)) < 2:
-        messagebox.showerror("Error", "Se necesitan al menos dos clases para entrenar los modelos.")
+    if len(set(labels)) < 2:
+        messagebox.showerror("Error", "Se necesitan al menos dos personas para entrenar correctamente.")
         return
-    try:
-        eigenface_recognizer = cv2.face.EigenFaceRecognizer_create()
-        eigenface_recognizer.train(faces, labels)
-        eigenface_recognizer.write("models/eigenfaces_model.xml")
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.train(np.array(faces, dtype=np.uint8), np.array(labels, dtype=np.int32))
+    recognizer.write(lbph_model_path)
+    with open(user_data_path, "w") as f:
+        json.dump(user_data, f, indent=4)
+    messagebox.showinfo("Entrenamiento completado", "El modelo ha sido actualizado correctamente.")
 
-        fisherface_recognizer = cv2.face.FisherFaceRecognizer_create()
-        fisherface_recognizer.train(faces, labels)
-        fisherface_recognizer.write("models/fisherfaces_model.xml")
+def reconocer_persona():
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.read(lbph_model_path)
+    cap = cv2.VideoCapture(0)
+    face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_classifier.detectMultiScale(gray, 1.3, 5)
+        for (x, y, w, h) in faces:
+            rostro = gray[y:y+h, x:x+w]
+            rostro = cv2.resize(rostro, (150, 150), interpolation=cv2.INTER_CUBIC)
+            label, confidence = recognizer.predict(rostro)
+            nombre = "Desconocido" if confidence > 60 else next((f"{u['Nombre']} {u['Apellido']}" for k, u in datos_usuarios.items() if u['Etiqueta'] == label), "Desconocido")
+            cv2.putText(frame, nombre, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.imshow("Reconocimiento de Rostros", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    cap.release()
+    cv2.destroyAllWindows()
 
-        lbph_recognizer = cv2.face.LBPHFaceRecognizer_create(radius=2, neighbors=16, grid_x=8, grid_y=8)
-        lbph_recognizer.train(faces, labels)
-        lbph_recognizer.write("models/lbph_model.xml")
-
-        with open("user_data.json", "w") as f:
-            json.dump(user_data, f, indent=4)
-
-        messagebox.showinfo("Entrenamiento completado", "Los modelos y los datos de usuario han sido guardados correctamente.")
-    except Exception as e:
-        messagebox.showerror("Error", f"Hubo un problema durante el entrenamiento: {str(e)}")
-# --- Configuración de la interfaz ---
+# Interfaz gráfica
 root = tk.Tk()
-root.title("Reco IA - Gestión de Usuarios")
-root.geometry("600x600")
+root.title("Reco IA - Captura y Reconocimiento de Rostros")
 
-frames = []
-acceso_frame = ttk.Frame(root)
-menu_frame = ttk.Frame(root)
-enrolamiento_frame = ttk.Frame(root)
-consulta_frame = ttk.Frame(root)
-frames.extend([acceso_frame, menu_frame, enrolamiento_frame, consulta_frame])
+frame = ttk.Frame(root, padding=10)
+frame.pack(fill="both", expand=True)
 
-# Frame de inicio de sesión
-ttk.Label(acceso_frame, text="Usuario:").pack(pady=5)
-usuario_entry = ttk.Entry(acceso_frame)
-usuario_entry.pack(pady=5)
+ttk.Label(frame, text="Nombre:").grid(row=0, column=0, sticky="w")
+nombre_entry = ttk.Entry(frame)
+nombre_entry.grid(row=0, column=1)
 
-ttk.Label(acceso_frame, text="Contraseña:").pack(pady=5)
-contrasena_entry = ttk.Entry(acceso_frame, show="*")
-contrasena_entry.pack(pady=5)
+ttk.Label(frame, text="Apellido:").grid(row=1, column=0, sticky="w")
+apellido_entry = ttk.Entry(frame)
+apellido_entry.grid(row=1, column=1)
 
-ttk.Button(acceso_frame, text="Iniciar Sesión", command=iniciar_sesion).pack(pady=20)
+ttk.Label(frame, text="Tipo de Documento:").grid(row=2, column=0, sticky="w")
+tipo_documento_combobox = ttk.Combobox(frame, values=["DNI", "Pasaporte", "Otro"])
+tipo_documento_combobox.grid(row=2, column=1)
 
-# Frame del menú principal
-ttk.Label(menu_frame, text="Seleccione una acción:").pack(pady=20)
-ttk.Button(menu_frame, text="Crear Dataset de Usuario", command=lambda: mostrar_frame(enrolamiento_frame)).pack(pady=10)
-ttk.Button(menu_frame, text="Consultar Usuario", command=lambda: mostrar_frame(consulta_frame)).pack(pady=10)
-ttk.Button(menu_frame, text="Entrenar Modelos", command=entrenar_modelos).pack(pady=10)
+ttk.Label(frame, text="Número de Documento:").grid(row=3, column=0, sticky="w")
+numero_documento_entry = ttk.Entry(frame)
+numero_documento_entry.grid(row=3, column=1)
 
-# Frame de consulta de usuario
-ttk.Label(consulta_frame, text="Número de Documento:").pack(pady=5)
-numero_documento_consulta_entry = ttk.Entry(consulta_frame)
-numero_documento_consulta_entry.pack(pady=5)
+ttk.Label(frame, text="Celular:").grid(row=4, column=0, sticky="w")
+celular_entry = ttk.Entry(frame)
+celular_entry.grid(row=4, column=1)
 
-# Frame de enrolamiento de usuario
-ttk.Label(enrolamiento_frame, text="Nombre:").pack(pady=5)
-nombre_entry = ttk.Entry(enrolamiento_frame)
-nombre_entry.pack(pady=5)
+ttk.Label(frame, text="Cargo:").grid(row=5, column=0, sticky="w")
+cargo_combobox = ttk.Combobox(frame, values=["Empleado", "Visitante", "Otro"])
+cargo_combobox.grid(row=5, column=1)
 
-ttk.Label(enrolamiento_frame, text="Apellido:").pack(pady=5)
-apellido_entry = ttk.Entry(enrolamiento_frame)
-apellido_entry.pack(pady=5)
+boton_captura = ttk.Button(frame, text="Capturar Imágenes", command=capturar_imagenes_para_dataset)
+boton_captura.grid(row=6, columnspan=2)
 
-ttk.Label(enrolamiento_frame, text="Tipo de Documento:").pack(pady=5)
-tipo_documento_combobox = ttk.Combobox(enrolamiento_frame, values=["C.C.", "T.I.", "Pasaporte"])
-tipo_documento_combobox.pack(pady=5)
+boton_entrenar = ttk.Button(frame, text="Entrenar", command=entrenar_modelos)
+boton_entrenar.grid(row=7, columnspan=2)
 
-ttk.Label(enrolamiento_frame, text="Número de Documento:").pack(pady=5)
-numero_documento_entry = ttk.Entry(enrolamiento_frame)
-numero_documento_entry.pack(pady=5)
-
-ttk.Label(enrolamiento_frame, text="Celular:").pack(pady=5)
-celular_entry = ttk.Entry(enrolamiento_frame)
-celular_entry.pack(pady=5)
-
-ttk.Label(enrolamiento_frame, text="Cargo:").pack(pady=5)
-cargo_combobox = ttk.Combobox(enrolamiento_frame, values=["Analista", "Supervisor", "Gerente"])
-cargo_combobox.pack(pady=5)
-
-ttk.Button(enrolamiento_frame, text="Capturar Imágenes", command=capturar_imagenes_para_dataset).pack(pady=20)
-ttk.Button(enrolamiento_frame, text="Regresar al Menú", command=lambda: mostrar_frame(menu_frame)).pack(pady=10)
-
-ttk.Button(consulta_frame, text="Consultar", command=consultar_usuario).pack(pady=10)
-foto_label = ttk.Label(consulta_frame)
-foto_label.pack(pady=10)
-
-ttk.Button(consulta_frame, text="Regresar al Menú", command=lambda: mostrar_frame(menu_frame)).pack(pady=10)
-
-# Mostrar frame inicial
-mostrar_frame(acceso_frame)
+boton_reconocer = ttk.Button(frame, text="Reconocer", command=reconocer_persona)
+boton_reconocer.grid(row=8, columnspan=2)
 
 root.mainloop()

@@ -1,0 +1,6 @@
+Nombre: Doray
+Apellido: Florez
+Tipo de Documento: DNI
+Número de Documento: 1001297843
+Celular: 3162767500
+Cargo: Empleado
