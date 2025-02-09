@@ -1,0 +1,6 @@
+Nombre: Jorge
+Apellido: Torres
+Tipo de Documento: C.C.
+Número de Documento: 1001297842
+Celular: 3162767501
+Cargo: Analista
